@@ -58,6 +58,14 @@ void MiKettleComponent::gattc_event_handler(esp_gattc_cb_event_t event,
       }
       ESP_LOGD(TAG, "Connected");
       state_ = MiKettleState::IDLE;
+      // Compute reversed MAC for cipher mixing from the open event BDA
+      const uint8_t *bda = param->open.remote_bda;
+      for (int i = 0; i < 6; i++) {
+        reversed_mac_[i] = bda[5 - i];
+      }
+      ESP_LOGD(TAG, "Reversed MAC: %02X:%02X:%02X:%02X:%02X:%02X",
+               reversed_mac_[0], reversed_mac_[1], reversed_mac_[2],
+               reversed_mac_[3], reversed_mac_[4], reversed_mac_[5]);
       break;
     }
 
@@ -103,21 +111,12 @@ void MiKettleComponent::gattc_event_handler(esp_gattc_cb_event_t event,
       status_handle_      = status_chr->handle;
       status_cccd_handle_ = get_cccd_handle_(MI_SERVICE_DATA_UUID, MI_CHAR_STATUS_UUID);
 
-      // ── Compute reversed MAC for cipher mixing ──
-      const uint8_t *bda = this->parent_->remote_bda;
-      for (int i = 0; i < 6; i++) {
-        reversed_mac_[i] = bda[5 - i];
-      }
-      ESP_LOGD(TAG, "Reversed MAC: %02X:%02X:%02X:%02X:%02X:%02X",
-               reversed_mac_[0], reversed_mac_[1], reversed_mac_[2],
-               reversed_mac_[3], reversed_mac_[4], reversed_mac_[5]);
-
       // ── Step 1: write KEY1 to auth-init characteristic ──
       ESP_LOGD(TAG, "Auth step 1 – writing KEY1");
       state_ = MiKettleState::WRITING_AUTH_INIT;
       auto err = esp_ble_gattc_write_char(
-          this->parent_->gattc_if,
-          this->parent_->conn_id,
+          this->parent_->get_gattc_if(),
+          this->parent_->get_conn_id(),
           auth_init_handle_,
           sizeof(MI_KEY1),
           const_cast<uint8_t *>(MI_KEY1),
@@ -159,8 +158,8 @@ void MiKettleComponent::gattc_event_handler(esp_gattc_cb_event_t event,
         ESP_LOGD(TAG, "Auth step 6 – reading version");
         state_ = MiKettleState::READING_VERSION;
         auto err = esp_ble_gattc_read_char(
-            this->parent_->gattc_if,
-            this->parent_->conn_id,
+            this->parent_->get_gattc_if(),
+            this->parent_->get_conn_id(),
             ver_handle_,
             ESP_GATT_AUTH_REQ_NONE);
         if (err != ESP_OK) {
@@ -191,8 +190,8 @@ void MiKettleComponent::gattc_event_handler(esp_gattc_cb_event_t event,
             MI_TOKEN, sizeof(MI_TOKEN));
 
         auto err = esp_ble_gattc_write_char(
-            this->parent_->gattc_if,
-            this->parent_->conn_id,
+            this->parent_->get_gattc_if(),
+            this->parent_->get_conn_id(),
             auth_handle_,
             static_cast<uint16_t>(auth_payload.size()),
             auth_payload.data(),
@@ -240,8 +239,8 @@ void MiKettleComponent::gattc_event_handler(esp_gattc_cb_event_t event,
             MI_KEY2, sizeof(MI_KEY2));
 
         auto err = esp_ble_gattc_write_char(
-            this->parent_->gattc_if,
-            this->parent_->conn_id,
+            this->parent_->get_gattc_if(),
+            this->parent_->get_conn_id(),
             auth_handle_,
             static_cast<uint16_t>(key2_payload.size()),
             key2_payload.data(),
@@ -305,9 +304,9 @@ uint16_t MiKettleComponent::get_cccd_handle_(espbt::ESPBTUUID service_uuid,
   auto *chr = this->parent_->get_characteristic(service_uuid, char_uuid);
   if (chr == nullptr)
     return 0;
-  for (auto &descr : chr->descriptors) {
-    if (descr.uuid == CCCD_UUID)
-      return descr.handle;
+  for (auto *descr : chr->descriptors) {
+    if (descr->uuid == CCCD_UUID)
+      return descr->handle;
   }
   return 0;
 }
@@ -319,8 +318,8 @@ bool MiKettleComponent::write_cccd_(uint16_t cccd_handle) {
   }
   static const uint8_t ENABLE_NOTIFY[2] = {0x01, 0x00};
   auto err = esp_ble_gattc_write_char_descr(
-      this->parent_->gattc_if,
-      this->parent_->conn_id,
+      this->parent_->get_gattc_if(),
+      this->parent_->get_conn_id(),
       cccd_handle,
       sizeof(ENABLE_NOTIFY),
       const_cast<uint8_t *>(ENABLE_NOTIFY),
