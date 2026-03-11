@@ -315,6 +315,19 @@ uint16_t MiKettleComponent::get_cccd_handle_(espbt::ESPBTUUID service_uuid,
     if (descr->uuid == CCCD_UUID)
       return descr->handle;
   }
+  // Fallback: query the ESP-IDF GATT descriptor cache directly.
+  // ESPHome may not populate chr->descriptors in all firmware versions.
+  esp_bt_uuid_t cccd_uuid = CCCD_UUID.get_uuid();
+  esp_gattc_descr_elem_t descr_elem;
+  uint16_t descr_count = 1;  // capacity in; actual count out
+  if (esp_ble_gattc_get_descr_by_char_handle(
+          this->parent_->get_gattc_if(),
+          this->parent_->get_conn_id(),
+          chr->handle,
+          cccd_uuid, &descr_elem, &descr_count) == ESP_GATT_OK
+      && descr_count > 0) {
+    return descr_elem.handle;
+  }
   return 0;
 }
 
