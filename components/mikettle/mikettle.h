@@ -121,6 +121,10 @@ class MiKettleComponent : public ble_client::BLEClientNode, public Component {
   // Helper: find CCCD handle for a characteristic
   uint16_t get_cccd_handle_(espbt::ESPBTUUID service_uuid, espbt::ESPBTUUID char_uuid);
 
+  // Resolve status_handle_ and status_cccd_handle_; tries ESPHome abstraction first,
+  // then falls back to querying the ESP-IDF GATT cache directly by characteristic UUID.
+  void resolve_status_handles_();
+
   // Parse the 8+ byte status notification payload
   void parse_status_(const uint8_t *data, uint16_t len);
 
