@@ -102,14 +102,10 @@ void MiKettleComponent::gattc_event_handler(esp_gattc_cb_event_t event,
       ver_handle_ = ver_chr->handle;
 
       // ── Status characteristic + its CCCD ──
-      auto *status_chr = this->parent_->get_characteristic(
-          MI_SERVICE_DATA_UUID, MI_CHAR_STATUS_UUID);
-      if (status_chr == nullptr) {
-        ESP_LOGE(TAG, "Status characteristic not found");
-        break;
-      }
-      status_handle_      = status_chr->handle;
-      status_cccd_handle_ = get_cccd_handle_(MI_SERVICE_DATA_UUID, MI_CHAR_STATUS_UUID);
+      // Best-effort: resolve now if possible; retried after auth completes.
+      // Authentication must not be blocked by a missing status handle here,
+      // because some devices only expose the data service after auth begins.
+      resolve_status_handles_();
 
       // ── Step 1: write KEY1 to auth-init characteristic ──
       ESP_LOGD(TAG, "Auth step 1 – writing KEY1");
@@ -269,6 +265,17 @@ void MiKettleComponent::gattc_event_handler(esp_gattc_cb_event_t event,
       if (state_ == MiKettleState::READING_VERSION &&
           param->read.handle == ver_handle_) {
         // ── Step 7: subscribe to status notifications ──
+        // If the status handle was not resolved during service discovery,
+        // retry now that authentication has completed.
+        if (status_handle_ == 0)
+          resolve_status_handles_();
+
+        if (status_handle_ == 0) {
+          ESP_LOGE(TAG, "Status characteristic not found – cannot receive updates");
+          state_ = MiKettleState::IDLE;
+          break;
+        }
+
         ESP_LOGD(TAG, "Auth step 7 – subscribing to status notifications");
         state_ = MiKettleState::SUBSCRIBING_STATUS;
         if (!write_cccd_(status_cccd_handle_)) {
@@ -309,6 +316,54 @@ uint16_t MiKettleComponent::get_cccd_handle_(espbt::ESPBTUUID service_uuid,
       return descr->handle;
   }
   return 0;
+}
+
+void MiKettleComponent::resolve_status_handles_() {
+  // ── Primary path: ESPHome service abstraction ──────────────────────────────
+  auto *status_chr = this->parent_->get_characteristic(
+      MI_SERVICE_DATA_UUID, MI_CHAR_STATUS_UUID);
+  if (status_chr != nullptr) {
+    status_handle_      = status_chr->handle;
+    status_cccd_handle_ = get_cccd_handle_(MI_SERVICE_DATA_UUID, MI_CHAR_STATUS_UUID);
+    ESP_LOGD(TAG, "Status characteristic resolved via service UUID (handle 0x%04X)", status_handle_);
+    return;
+  }
+
+  // ── Fallback: query the ESP-IDF GATT cache directly ────────────────────────
+  // This succeeds even when ESPHome's service-level UUID matching fails
+  // (e.g. the data service UUID is not found in services_ despite being
+  // present in the underlying ESP-IDF GATT attribute cache).
+  ESP_LOGD(TAG, "Service-level lookup failed; falling back to direct GATT cache search");
+  esp_bt_uuid_t stat_uuid = MI_CHAR_STATUS_UUID.get_uuid();
+  esp_gattc_char_elem_t char_elem;
+  uint16_t char_count = 1;
+  esp_gatt_status_t gatt_err = esp_ble_gattc_get_char_by_uuid(
+      this->parent_->get_gattc_if(),
+      this->parent_->get_conn_id(),
+      0x0001, 0xFFFF,
+      stat_uuid, &char_elem, &char_count);
+  if (gatt_err != ESP_GATT_OK || char_count == 0) {
+    ESP_LOGD(TAG, "Status characteristic not found in GATT cache (err=%d)", gatt_err);
+    return;  // handles remain 0; caller decides whether to fail
+  }
+  status_handle_ = char_elem.char_handle;
+  ESP_LOGD(TAG, "Status characteristic found via direct GATT lookup (handle 0x%04X)", status_handle_);
+
+  // Locate the CCCD descriptor for this characteristic
+  esp_bt_uuid_t cccd_uuid = CCCD_UUID.get_uuid();
+  esp_gattc_descr_elem_t descr_elem;
+  uint16_t descr_count = 1;
+  if (esp_ble_gattc_get_descr_by_char_handle(
+          this->parent_->get_gattc_if(),
+          this->parent_->get_conn_id(),
+          char_elem.char_handle,
+          cccd_uuid, &descr_elem, &descr_count) == ESP_GATT_OK
+      && descr_count > 0) {
+    status_cccd_handle_ = descr_elem.handle;
+    ESP_LOGD(TAG, "Status CCCD resolved (handle 0x%04X)", status_cccd_handle_);
+  } else {
+    ESP_LOGW(TAG, "Status CCCD descriptor not found");
+  }
 }
 
 bool MiKettleComponent::write_cccd_(uint16_t cccd_handle) {
