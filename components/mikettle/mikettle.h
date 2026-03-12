@@ -3,6 +3,7 @@
 #include "esphome/core/component.h"
 #include "esphome/components/ble_client/ble_client.h"
 #include "esphome/components/esp32_ble_tracker/esp32_ble_tracker.h"
+#include "esphome/components/number/number.h"
 #include "esphome/components/sensor/sensor.h"
 #include "esphome/components/text_sensor/text_sensor.h"
 
@@ -84,6 +85,15 @@ enum class MiKettleState : uint8_t {
   READY,                // authenticated and receiving status notifications
 };
 
+// ── Forward declaration ───────────────────────────────────────────────────────
+class MiKettleComponent;
+
+// ── Writable number entity for target temperature ─────────────────────────────
+class MiKettleNumber : public number::Number, public Parented<MiKettleComponent> {
+ protected:
+  void control(float value) override;
+};
+
 // ── Component ─────────────────────────────────────────────────────────────────
 class MiKettleComponent : public ble_client::BLEClientNode, public Component {
  public:
@@ -108,6 +118,10 @@ class MiKettleComponent : public ble_client::BLEClientNode, public Component {
   void set_mode_sensor(text_sensor::TextSensor *s)       { mode_sensor_ = s; }
   void set_keep_warm_type_sensor(text_sensor::TextSensor *s) { keep_warm_type_sensor_ = s; }
   void set_keep_warm_time_sensor(sensor::Sensor *s)      { keep_warm_time_sensor_ = s; }
+  void set_target_temperature_number(number::Number *n)  { target_temperature_number_ = n; }
+
+  // Write a keep-warm target temperature (40–95 °C) to the kettle
+  void write_target_temperature(uint8_t temp);
 
  protected:
   // ── RC4-derived cipher used for authentication ──────────────────────────
@@ -155,6 +169,7 @@ class MiKettleComponent : public ble_client::BLEClientNode, public Component {
   uint16_t ver_handle_{0};
   uint16_t status_handle_{0};
   uint16_t status_cccd_handle_{0};
+  uint16_t setup_handle_{0};
 
   // ── Sensors ─────────────────────────────────────────────────────────────
   sensor::Sensor          *current_temperature_{nullptr};
@@ -163,6 +178,7 @@ class MiKettleComponent : public ble_client::BLEClientNode, public Component {
   text_sensor::TextSensor *mode_sensor_{nullptr};
   text_sensor::TextSensor *keep_warm_type_sensor_{nullptr};
   sensor::Sensor          *keep_warm_time_sensor_{nullptr};
+  number::Number          *target_temperature_number_{nullptr};
 };
 
 }  // namespace mikettle
