@@ -142,7 +142,10 @@ class MiKettleComponent : public ble_client::BLEClientNode, public Component {
   uint8_t token_[MI_TOKEN_LEN]{
       0x01, 0x5C, 0xCB, 0xA8, 0x80, 0x0A, 0xBD, 0xC1, 0x2E, 0xB8, 0xED, 0x82};
 
-  // Reversed MAC address (computed once on connect)
+  // Remote Bluetooth device address (populated on connect, needed for register_for_notify)
+  uint8_t remote_bda_[6]{};
+
+  // Reversed MAC address (computed once on connect, used for auth cipher mixing)
   uint8_t reversed_mac_[6]{};
 
   // GATT attribute handles (populated after service discovery)

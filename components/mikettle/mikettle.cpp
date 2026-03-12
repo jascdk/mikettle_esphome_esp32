@@ -62,8 +62,10 @@ void MiKettleComponent::gattc_event_handler(esp_gattc_cb_event_t event,
       }
       ESP_LOGD(TAG, "Connected");
       state_ = MiKettleState::IDLE;
-      // Compute reversed MAC for cipher mixing from the open event BDA
+      // Store remote BDA (needed for esp_ble_gattc_register_for_notify)
+      // and compute reversed MAC (LSB-first) for cipher mixing.
       const uint8_t *bda = param->open.remote_bda;
+      memcpy(remote_bda_, bda, sizeof(remote_bda_));
       for (int i = 0; i < 6; i++) {
         reversed_mac_[i] = bda[5 - i];
       }
@@ -139,10 +141,18 @@ void MiKettleComponent::gattc_event_handler(esp_gattc_cb_event_t event,
 
       if (state_ == MiKettleState::WRITING_AUTH_INIT &&
           param->write.handle == auth_init_handle_) {
-        // ── Step 2: subscribe to auth characteristic notifications ──
-        ESP_LOGD(TAG, "Auth step 2 – enabling auth notifications");
+        // ── Step 2: register for auth characteristic notifications ──
+        // Must call register_for_notify so that the ESP-IDF GATT client
+        // dispatches ESP_GATTC_NOTIFY_EVT when the kettle sends its auth
+        // notification.  The CCCD will be written in REG_FOR_NOTIFY_EVT.
+        ESP_LOGD(TAG, "Auth step 2 – registering for auth notifications");
         state_ = MiKettleState::SUBSCRIBING_AUTH;
-        if (!write_cccd_(auth_cccd_handle_)) {
+        auto err = esp_ble_gattc_register_for_notify(
+            this->parent_->get_gattc_if(),
+            remote_bda_,
+            auth_handle_);
+        if (err != ESP_OK) {
+          ESP_LOGE(TAG, "Register for auth notify failed: %d", err);
           state_ = MiKettleState::IDLE;
         }
 
@@ -164,6 +174,34 @@ void MiKettleComponent::gattc_event_handler(esp_gattc_cb_event_t event,
             ESP_GATT_AUTH_REQ_NONE);
         if (err != ESP_OK) {
           ESP_LOGE(TAG, "Read version failed: %d", err);
+          state_ = MiKettleState::IDLE;
+        }
+      }
+      break;
+    }
+
+    // ── Notification registration confirmed ──────────────────────────────
+    case ESP_GATTC_REG_FOR_NOTIFY_EVT: {
+      if (param->reg_for_notify.status != ESP_GATT_OK) {
+        ESP_LOGW(TAG, "Register for notify failed: handle=%d status=%d",
+                 param->reg_for_notify.handle, param->reg_for_notify.status);
+        state_ = MiKettleState::IDLE;
+        break;
+      }
+
+      if (state_ == MiKettleState::SUBSCRIBING_AUTH &&
+          param->reg_for_notify.handle == auth_handle_) {
+        // ── Step 2b: write CCCD to tell the kettle to send auth notifications ──
+        ESP_LOGD(TAG, "Auth step 2b – enabling auth notifications via CCCD");
+        if (!write_cccd_(auth_cccd_handle_)) {
+          state_ = MiKettleState::IDLE;
+        }
+
+      } else if (state_ == MiKettleState::SUBSCRIBING_STATUS &&
+                 param->reg_for_notify.handle == status_handle_) {
+        // ── Step 7b: write CCCD to tell the kettle to send status notifications ──
+        ESP_LOGD(TAG, "Auth step 7b – enabling status notifications via CCCD");
+        if (!write_cccd_(status_cccd_handle_)) {
           state_ = MiKettleState::IDLE;
         }
       }
@@ -282,7 +320,12 @@ void MiKettleComponent::gattc_event_handler(esp_gattc_cb_event_t event,
 
         ESP_LOGD(TAG, "Auth step 7 – subscribing to status notifications");
         state_ = MiKettleState::SUBSCRIBING_STATUS;
-        if (!write_cccd_(status_cccd_handle_)) {
+        auto err = esp_ble_gattc_register_for_notify(
+            this->parent_->get_gattc_if(),
+            remote_bda_,
+            status_handle_);
+        if (err != ESP_OK) {
+          ESP_LOGE(TAG, "Register for status notify failed: %d", err);
           state_ = MiKettleState::IDLE;
         }
       }
@@ -300,6 +343,7 @@ void MiKettleComponent::gattc_event_handler(esp_gattc_cb_event_t event,
       ver_handle_         = 0;
       status_handle_      = 0;
       status_cccd_handle_ = 0;
+      memset(remote_bda_, 0, sizeof(remote_bda_));
       break;
     }
 
