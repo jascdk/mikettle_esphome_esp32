@@ -8,6 +8,7 @@
 
 #ifdef USE_ESP32
 
+#include <array>
 #include <vector>
 
 namespace esphome {
@@ -67,9 +68,8 @@ static const espbt::ESPBTUUID CCCD_UUID = espbt::ESPBTUUID::from_uint16(0x2902);
 // ── Authentication constants ──────────────────────────────────────────────────
 static const uint8_t MI_KEY1[4]  = {0x90, 0xCA, 0x85, 0xDE};
 static const uint8_t MI_KEY2[4]  = {0x92, 0xAB, 0x54, 0xFA};
-// Fixed 12-byte session token (matches the reference implementation)
-static const uint8_t MI_TOKEN[12] = {
-    0x01, 0x5C, 0xCB, 0xA8, 0x80, 0x0A, 0xBD, 0xC1, 0x2E, 0xB8, 0xED, 0x82};
+
+static constexpr size_t MI_TOKEN_LEN = 12;
 
 // ── Authentication state machine ─────────────────────────────────────────────
 enum class MiKettleState : uint8_t {
@@ -97,6 +97,9 @@ class MiKettleComponent : public ble_client::BLEClientNode, public Component {
 
   // ── Configuration setters (called from generated code) ──────────────────
   void set_product_id(uint16_t product_id) { product_id_ = product_id; }
+  void set_token(std::array<uint8_t, MI_TOKEN_LEN> token) {
+    memcpy(token_, token.data(), MI_TOKEN_LEN);
+  }
 
   // ── Sensor / text-sensor registration ──────────────────────────────────
   void set_current_temperature_sensor(sensor::Sensor *s) { current_temperature_ = s; }
@@ -134,6 +137,10 @@ class MiKettleComponent : public ble_client::BLEClientNode, public Component {
   // ── Runtime state ────────────────────────────────────────────────────────
   MiKettleState state_{MiKettleState::IDLE};
   uint16_t product_id_{275};
+
+  // Per-device authentication token (12 bytes, obtained from Mi Home)
+  uint8_t token_[MI_TOKEN_LEN]{
+      0x01, 0x5C, 0xCB, 0xA8, 0x80, 0x0A, 0xBD, 0xC1, 0x2E, 0xB8, 0xED, 0x82};
 
   // Reversed MAC address (computed once on connect)
   uint8_t reversed_mac_[6]{};

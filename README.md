@@ -87,6 +87,9 @@ external_components:
 mikettle:
   ble_client_id: mi_kettle_ble
   product_id: 275          # 275 = EU; use 131 for some CN variants
+  # Per-device token (24 hex chars = 12 bytes). Required for authentication.
+  # Extract it from Mi Home with a tool like `miio-tokens` or `python-miio`.
+  token: "AABBCCDDEEFF001122334455"  # ← replace with your token
 
   current_temperature:
     name: "Kettle Temperature"
@@ -120,6 +123,11 @@ mikettle:
   # Optional – product ID; 275 = EU version, 131 = some CN versions
   product_id: 275
 
+  # Per-device authentication token (24 hex chars = 12 bytes).
+  # Required for authentication to succeed on most devices.
+  # Obtain from Mi Home with a token extractor (e.g. `miio-tokens`, `python-miio`).
+  token: "AABBCCDDEEFF001122334455"   # ← replace with your device's token
+
   # All sensors below are optional – omit any you don't need
 
   current_temperature:
@@ -146,7 +154,7 @@ mikettle:
 
 ## BLE protocol overview
 
-Authentication is a 6-step RC4-derived cipher handshake:
+Authentication is a 6-step RC4-derived cipher handshake that requires a **per-device token** (12 bytes, obtained from Mi Home):
 
 1. Write `KEY1` (`0x90 0xCA 0x85 0xDE`) to the **auth-init** characteristic.
 2. Enable notifications on the **auth** characteristic (write CCCD `0x01 0x00`).

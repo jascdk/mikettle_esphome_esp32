@@ -56,6 +56,9 @@ mikettle:
   id: my_kettle
   ble_client_id: mi_kettle_ble
   product_id: 275  # 275 = EU version (use 131 for some other variants)
+  # Per-device token obtained from Mi Home (24 hex characters = 12 bytes).
+  # Use a tool such as `miio-tokens` or `python-miio` to extract it.
+  token: "015CCBA8800ABDC12EB8ED82"  # ← replace with your device's token
 
   # Numeric sensors
   current_temperature:

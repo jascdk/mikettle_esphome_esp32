@@ -34,6 +34,10 @@ void MiKettleComponent::setup() {
 void MiKettleComponent::dump_config() {
   ESP_LOGCONFIG(TAG, "Mi Kettle");
   ESP_LOGCONFIG(TAG, "  Product ID : %u", product_id_);
+  ESP_LOGCONFIG(TAG, "  Token      : %02X%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X",
+                token_[0], token_[1], token_[2], token_[3],
+                token_[4], token_[5], token_[6], token_[7],
+                token_[8], token_[9], token_[10], token_[11]);
   LOG_SENSOR("  ", "Current Temperature", current_temperature_);
   LOG_SENSOR("  ", "Set Temperature",     set_temperature_);
   LOG_TEXT_SENSOR("  ", "Action",         action_sensor_);
@@ -183,7 +187,7 @@ void MiKettleComponent::gattc_event_handler(esp_gattc_cb_event_t event,
         auto mix_a_result = mix_a(reversed_mac_, product_id_);
         auto auth_payload = cipher(
             mix_a_result.data(), mix_a_result.size(),
-            MI_TOKEN, sizeof(MI_TOKEN));
+            token_, sizeof(token_));
 
         auto err = esp_ble_gattc_write_char(
             this->parent_->get_gattc_if(),
@@ -222,8 +226,8 @@ void MiKettleComponent::gattc_event_handler(esp_gattc_cb_event_t event,
         auto outer = cipher(
             mix_b_result.data(), mix_b_result.size(),
             inner.data(), inner.size());
-        if (outer.size() != sizeof(MI_TOKEN) ||
-            memcmp(outer.data(), MI_TOKEN, sizeof(MI_TOKEN)) != 0) {
+        if (outer.size() != sizeof(token_) ||
+            memcmp(outer.data(), token_, sizeof(token_)) != 0) {
           ESP_LOGW(TAG, "Auth integrity check failed – continuing anyway");
         }
 
@@ -231,7 +235,7 @@ void MiKettleComponent::gattc_event_handler(esp_gattc_cb_event_t event,
         ESP_LOGD(TAG, "Auth step 5 – writing KEY2");
         state_ = MiKettleState::WRITING_AUTH_KEY2;
         auto key2_payload = cipher(
-            MI_TOKEN, sizeof(MI_TOKEN),
+            token_, sizeof(token_),
             MI_KEY2, sizeof(MI_KEY2));
 
         auto err = esp_ble_gattc_write_char(
