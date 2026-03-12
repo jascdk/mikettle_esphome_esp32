@@ -6,9 +6,20 @@ It communicates with the kettle over **Bluetooth Low Energy** using the same pro
 [mikettle Python library](https://github.com/drndos/mikettle) and the
 [protocol documentation by aprosvetova](https://github.com/aprosvetova/xiaomi-kettle).
 
+> **TL;DR – two ways to use this repo:**
+>
+> | | [Pure ESPHome (advertisement)](#option-a--pure-esphome-ble-advertisement-no-external-component) | [Full component (GATT)](#option-b--external-component-full-ble-gatt) |
+> |---|---|---|
+> | External component needed? | ❌ No | ✅ Yes |
+> | Authentication token needed? | ❌ No | ✅ Yes |
+> | Sensors available | Temperature + Action | All sensors below |
+> | Complexity | Low | Medium |
+>
+> **If you just want temperature and action state and don't want to deal with tokens, use [Option A](#option-a--pure-esphome-ble-advertisement-no-external-component).**
+
 ---
 
-## Features
+## Features (full component)
 
 | Sensor | Type | Description |
 |--------|------|-------------|
@@ -28,13 +39,66 @@ It communicates with the kettle over **Bluetooth Low Energy** using the same pro
 
 ---
 
-## Quick start
+## Option A – Pure ESPHome (BLE advertisement, no external component)
 
-### 1 – Find your kettle's Bluetooth MAC address
+This approach reads the temperature and action state directly from the
+**BLE advertisement packets** that the Mi Kettle broadcasts continuously.
+No authentication token is required, and no external component is needed –
+it is 100% standard ESPHome YAML.
+
+### Quick start
+
+1. Copy [`mikettle_adv.yaml`](mikettle_adv.yaml) into your ESPHome config directory.
+2. Replace `AA:BB:CC:DD:EE:FF` with your kettle's actual MAC address.
+3. Flash and you're done.
+
+```yaml
+esp32_ble_tracker:
+  on_ble_service_data_advertise:
+    - mac_address: "AA:BB:CC:DD:EE:FF"   # ← your kettle's MAC
+      service_uuid: "FE95"
+      then:
+        - lambda: |-
+            if (x.size() < 17) return;
+            id(kettle_temp).publish_state(float(x[16]));
+            switch (x[15]) {
+              case 0x01: id(kettle_action).publish_state("heating");    break;
+              case 0x02: id(kettle_action).publish_state("cooling");    break;
+              case 0x03: id(kettle_action).publish_state("keep warm");  break;
+              default:   id(kettle_action).publish_state("idle");       break;
+            }
+```
+
+The full working example is in [`mikettle_adv.yaml`](mikettle_adv.yaml).
+
+### What you get
+
+| Sensor | Description |
+|--------|-------------|
+| `Kettle Temperature` | Current water temperature (°C) |
+| `Kettle Action` | `idle` / `heating` / `cooling` / `keep warm` |
+
+---
+
+## Option B – External component (full BLE GATT)
+
+This approach connects to the kettle over BLE GATT, authenticates using a
+per-device token from Mi Home, and subscribes to status characteristic
+notifications.  It provides all sensors listed in the table above.
+
+> **Prerequisite:** you must know your device's 12-byte authentication token.
+> Extract it from Mi Home with a tool like
+> [`miio-tokens`](https://pypi.org/project/miio/) or
+> [`python-miio`](https://python-miio.readthedocs.io/).
+> If you don't have the token, use [Option A](#option-a--pure-esphome-ble-advertisement-no-external-component) instead.
+
+### Quick start
+
+#### 1 – Find your kettle's Bluetooth MAC address
 
 Use the built-in ESPHome BLE scan or run `bluetoothctl scan on` on any Linux/Mac machine.
 
-### 2 – Copy the component into your ESPHome config directory
+#### 2 – Copy the component into your ESPHome config directory
 
 ```
 your-esphome-config/
@@ -54,7 +118,7 @@ external_components:
     components: [mikettle]
 ```
 
-### 3 – Create / adapt `mikettle.yaml`
+#### 3 – Create / adapt `mikettle.yaml`
 
 ```yaml
 esphome:
@@ -105,7 +169,7 @@ mikettle:
     name: "Kettle Keep Warm Type"
 ```
 
-### 4 – Flash
+#### 4 – Flash
 
 ```bash
 esphome run mikettle.yaml
