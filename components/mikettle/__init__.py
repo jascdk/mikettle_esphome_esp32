@@ -1,7 +1,7 @@
 """ESPHome external component: Mi Kettle (Xiaomi BLE kettle)."""
 import esphome.codegen as cg
 import esphome.config_validation as cv
-from esphome.components import ble_client, sensor, text_sensor
+from esphome.components import ble_client, number, sensor, text_sensor
 from esphome.const import (
     CONF_ID,
     DEVICE_CLASS_TEMPERATURE,
@@ -11,22 +11,26 @@ from esphome.const import (
 )
 
 DEPENDENCIES = ["esp32_ble_tracker", "ble_client"]
-AUTO_LOAD = ["sensor", "text_sensor"]
+AUTO_LOAD = ["sensor", "text_sensor", "number"]
 
 mikettle_ns = cg.esphome_ns.namespace("mikettle")
 MiKettleComponent = mikettle_ns.class_(
     "MiKettleComponent", ble_client.BLEClientNode, cg.Component
 )
+MiKettleNumber = mikettle_ns.class_(
+    "MiKettleNumber", number.Number, cg.Parented.template(MiKettleComponent)
+)
 
 # ── Config key names ──────────────────────────────────────────────────────────
-CONF_PRODUCT_ID        = "product_id"
-CONF_TOKEN             = "token"
+CONF_PRODUCT_ID          = "product_id"
+CONF_TOKEN               = "token"
 CONF_CURRENT_TEMPERATURE = "current_temperature"
-CONF_SET_TEMPERATURE   = "set_temperature"
-CONF_ACTION            = "action"
-CONF_MODE              = "mode"
-CONF_KEEP_WARM_TYPE    = "keep_warm_type"
-CONF_KEEP_WARM_TIME    = "keep_warm_time"
+CONF_SET_TEMPERATURE     = "set_temperature"
+CONF_TARGET_TEMPERATURE  = "target_temperature"
+CONF_ACTION              = "action"
+CONF_MODE                = "mode"
+CONF_KEEP_WARM_TYPE      = "keep_warm_type"
+CONF_KEEP_WARM_TIME      = "keep_warm_time"
 
 _TOKEN_LEN = 12
 
@@ -76,6 +80,12 @@ CONFIG_SCHEMA = (
                 unit_of_measurement=UNIT_MINUTE,
                 accuracy_decimals=0,
                 state_class=STATE_CLASS_MEASUREMENT,
+            ),
+            # ── Writable number ───────────────────────────────────────────
+            cv.Optional(CONF_TARGET_TEMPERATURE): number.number_schema(
+                MiKettleNumber,
+                unit_of_measurement=UNIT_CELSIUS,
+                device_class=DEVICE_CLASS_TEMPERATURE,
             ),
             # ── Text sensors ──────────────────────────────────────────────
             cv.Optional(CONF_ACTION): text_sensor.text_sensor_schema(),
@@ -128,3 +138,12 @@ async def to_code(config):
     if kw_time_cfg := config.get(CONF_KEEP_WARM_TIME):
         sens = await sensor.new_sensor(kw_time_cfg)
         cg.add(var.set_keep_warm_time_sensor(sens))
+
+    if target_temp_cfg := config.get(CONF_TARGET_TEMPERATURE):
+        n = await number.new_number(
+            target_temp_cfg,
+            min_value=40,
+            max_value=95,
+            step=1,
+        )
+        cg.add(var.set_target_temperature_number(n))

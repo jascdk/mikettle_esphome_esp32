@@ -69,6 +69,11 @@ mikettle:
     name: "Kettle Set Temperature"
     id: kettle_set_temp
 
+  # Writable number – set the keep-warm target temperature (40–95 °C)
+  target_temperature:
+    name: "Kettle Target Temperature"
+    id: kettle_target_temp
+
   keep_warm_time:
     name: "Kettle Keep Warm Time"
     id: kettle_kw_time

@@ -113,6 +113,16 @@ void MiKettleComponent::gattc_event_handler(esp_gattc_cb_event_t event,
       // because some devices only expose the data service after auth begins.
       resolve_status_handles_();
 
+      // ── Setup (keep-warm) characteristic ──
+      auto *setup_chr = this->parent_->get_characteristic(
+          MI_SERVICE_DATA_UUID, MI_CHAR_SETUP_UUID);
+      if (setup_chr != nullptr) {
+        setup_handle_ = setup_chr->handle;
+        ESP_LOGD(TAG, "Setup characteristic resolved (handle 0x%04X)", setup_handle_);
+      } else {
+        ESP_LOGD(TAG, "Setup characteristic not found during discovery");
+      }
+
       // ── Step 1: write KEY1 to auth-init characteristic ──
       ESP_LOGD(TAG, "Auth step 1 – writing KEY1");
       state_ = MiKettleState::WRITING_AUTH_INIT;
@@ -343,6 +353,7 @@ void MiKettleComponent::gattc_event_handler(esp_gattc_cb_event_t event,
       ver_handle_         = 0;
       status_handle_      = 0;
       status_cccd_handle_ = 0;
+      setup_handle_       = 0;
       memset(remote_bda_, 0, sizeof(remote_bda_));
       break;
     }
@@ -487,6 +498,8 @@ void MiKettleComponent::parse_status_(const uint8_t *data, uint16_t len) {
   // Byte 4 – Keep-warm set temperature (°C)
   if (set_temperature_ != nullptr)
     set_temperature_->publish_state(static_cast<float>(data[4]));
+  if (target_temperature_number_ != nullptr)
+    target_temperature_number_->publish_state(static_cast<float>(data[4]));
 
   // Byte 5 – Current temperature (°C)
   if (current_temperature_ != nullptr)
@@ -567,6 +580,40 @@ std::vector<uint8_t> MiKettleComponent::mix_b(const uint8_t *mac,
       static_cast<uint8_t>((product_id >> 8) & 0xFF),
       mac[4], mac[0], mac[5],
       static_cast<uint8_t>(product_id & 0xFF)};
+}
+
+// ── Target temperature write ──────────────────────────────────────────────────
+
+void MiKettleComponent::write_target_temperature(uint8_t temp) {
+  if (state_ != MiKettleState::READY) {
+    ESP_LOGW(TAG, "Cannot set temperature: not connected/authenticated");
+    return;
+  }
+  if (setup_handle_ == 0) {
+    ESP_LOGW(TAG, "Cannot set temperature: setup characteristic handle unknown");
+    return;
+  }
+  // Payload: [mode=0x02, 0x00, 0x00, 0x00, temp]
+  // Mode 0x02 = keep-warm (boil first, then cool/maintain to target temp).
+  uint8_t payload[5] = {0x02, 0x00, 0x00, 0x00, temp};
+  ESP_LOGD(TAG, "Writing target temperature %u °C to setup characteristic", temp);
+  auto err = esp_ble_gattc_write_char(
+      this->parent_->get_gattc_if(),
+      this->parent_->get_conn_id(),
+      setup_handle_,
+      sizeof(payload),
+      payload,
+      ESP_GATT_WRITE_TYPE_RSP,
+      ESP_GATT_AUTH_REQ_NONE);
+  if (err != ESP_OK) {
+    ESP_LOGE(TAG, "Write target temperature failed: %d", err);
+  }
+}
+
+// ── MiKettleNumber ────────────────────────────────────────────────────────────
+
+void MiKettleNumber::control(float value) {
+  this->parent_->write_target_temperature(static_cast<uint8_t>(value));
 }
 
 }  // namespace mikettle
